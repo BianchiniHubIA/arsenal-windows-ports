@@ -1,0 +1,244 @@
+diff --git a/exp/cli/gateway/key_output.py b/exp/cli/gateway/key_output.py
+index 4480ed7..483fd4a 100644
+--- a/exp/cli/gateway/key_output.py
++++ b/exp/cli/gateway/key_output.py
+@@ -141,7 +141,7 @@ def deliver_key_output(
+     try:
+         descriptor = os.open(
+             reservation,
+-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+             0o600,
+         )
+         created = os.fstat(descriptor)
+@@ -359,7 +359,7 @@ def key_output_marker_path(path: Path) -> Path:
+ def _write_marker_once(path: Path, marker: _KeyOutputMarker) -> _FileIdentity:
+     """Atomically persist one private marker without replacing prior evidence."""
+     staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+-    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
++    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+     try:
+         payload = canonical_json_bytes(marker) + b"\n"
+         written = 0
+@@ -419,7 +419,7 @@ def _exact_output_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdentit
+ def _recorded_inode_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdentity | None:
+     """Return one bounded private file matching the recorded reservation inode."""
+     try:
+-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+         try:
+             metadata = os.fstat(descriptor)
+         finally:
+@@ -428,7 +428,7 @@ def _recorded_inode_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdent
+         return None
+     if (
+         not stat.S_ISREG(metadata.st_mode)
+-        or metadata.st_mode & 0o077
++        or (os.name != "nt" and (os.name != "nt" and metadata.st_mode & 0o077))
+         or metadata.st_size > marker.output_length
+         or (metadata.st_dev, metadata.st_ino) != (marker.target_device, marker.target_inode)
+     ):
+@@ -457,10 +457,10 @@ def _read_private_regular(
+     maximum_length: int,
+ ) -> tuple[bytes, _FileIdentity]:
+     """Read bounded bytes and identity from the same private no-follow descriptor."""
+-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+     try:
+         metadata = os.fstat(descriptor)
+-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
++        if not stat.S_ISREG(metadata.st_mode) or (os.name != "nt" and (os.name != "nt" and metadata.st_mode & 0o077)):
+             raise KeyOutputRecoveryError("key output state is not a private regular file")
+         if metadata.st_size > maximum_length:
+             raise KeyOutputRecoveryError("key output state exceeds its expected size")
+diff --git a/exp/common/core/files.py b/exp/common/core/files.py
+index 61f0e88..240187d 100644
+--- a/exp/common/core/files.py
++++ b/exp/common/core/files.py
+@@ -89,7 +89,7 @@ def write_bytes_atomic(path: Path, payload: bytes, *, follow_symlinks: bool = Tr
+             # no-follow stat matters under `follow_symlinks=False`: the rename replaces a swapped
+             # destination symlink itself, and copying the LINK TARGET's mode would let whoever
+             # planted the link pick the replacement file's permissions.
+-            staging.chmod(destination_stat.st_mode & 0o7777)
++            staging.chmod(destination_stat.st_mode & 0o777)
+         try:
+             staging.replace(path)
+         except OSError as error:
+diff --git a/exp/common/project/artifact_files.py b/exp/common/project/artifact_files.py
+index 713fef5..eddb938 100644
+--- a/exp/common/project/artifact_files.py
++++ b/exp/common/project/artifact_files.py
+@@ -11,14 +11,14 @@ def _read_artifact_file_snapshot(directory: Path, relative_path: str) -> bytes:
+     """Read a regular descendant without following a replaced path component."""
+     if not hasattr(os, "O_NOFOLLOW"):
+         raise OSError("secure artifact reads require O_NOFOLLOW")
+-    directory_fd = os.open(directory, os.O_RDONLY | os.O_NOFOLLOW)
++    directory_fd = os.open(directory, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+     current_fd = directory_fd
+     try:
+         if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
+             raise OSError("artifact directory is not a directory")
+         parts = PurePosixPath(relative_path).parts
+         for component in parts[:-1]:
+-            next_fd = os.open(component, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current_fd)
++            next_fd = os.open(component, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current_fd)
+             try:
+                 if not stat.S_ISDIR(os.fstat(next_fd).st_mode):
+                     raise OSError("artifact data path has a non-directory component")
+@@ -27,7 +27,7 @@ def _read_artifact_file_snapshot(directory: Path, relative_path: str) -> bytes:
+                 raise
+             os.close(current_fd)
+             current_fd = next_fd
+-        file_descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current_fd)
++        file_descriptor = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current_fd)
+         try:
+             if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+                 raise OSError("artifact data path is not a regular file")
+@@ -71,7 +71,7 @@ def publish_blob(root: Path, relative_directory: PurePosixPath, payload: bytes)
+     digest = hashlib.sha256(payload).hexdigest()
+     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+     _fsync_directory_strict(root.parent)
+-    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+     staging = f".{uuid4().hex}.partial"
+     try:
+         for component in relative_directory.parts:
+@@ -82,13 +82,13 @@ def publish_blob(root: Path, relative_directory: PurePosixPath, payload: bytes)
+             else:
+                 os.fsync(descriptor)
+             next_descriptor = os.open(
+-                component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
++                component, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=descriptor
+             )
+             os.close(descriptor)
+             descriptor = next_descriptor
+         file_descriptor = os.open(
+             staging,
+-            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
++            os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+             mode=0o600,
+             dir_fd=descriptor,
+         )
+@@ -106,7 +106,7 @@ def publish_blob(root: Path, relative_directory: PurePosixPath, payload: bytes)
+                     follow_symlinks=False,
+                 )
+             except FileExistsError:
+-                existing = os.open(digest, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
++                existing = os.open(digest, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=descriptor)
+                 try:
+                     if not stat.S_ISREG(os.fstat(existing).st_mode) or (
+                         _read_file_descriptor(existing) != payload
+diff --git a/exp/common/project/bundle.py b/exp/common/project/bundle.py
+index e4af721..6728f40 100644
+--- a/exp/common/project/bundle.py
++++ b/exp/common/project/bundle.py
+@@ -886,7 +886,7 @@ def _open_regular_file(path: Path) -> Iterator[BinaryIO]:
+     if not hasattr(os, "O_NOFOLLOW"):
+         raise ProjectBundleError("secure bundle reads require O_NOFOLLOW")
+     try:
+-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+     except OSError as exc:
+         raise ProjectBundleError(f"Project bundle is missing or unsafe: {path}") from exc
+     try:
+diff --git a/exp/common/project/database.py b/exp/common/project/database.py
+index 8924a08..8cff450 100644
+--- a/exp/common/project/database.py
++++ b/exp/common/project/database.py
+@@ -53,13 +53,13 @@ def _create_database(path: Path) -> None:
+     if path.parent.is_symlink():
+         raise ValueError("Content database directory must not be a symlink.")
+     try:
+-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
++        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
+     except FileExistsError:
+         pass
+     else:
+         os.close(descriptor)
+     metadata = path.lstat()
+-    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) & 0o077:
++    if not stat.S_ISREG(metadata.st_mode) or (os.name != "nt" and (os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077)):
+         raise ValueError("Content database must be a private regular file.")
+ 
+ 
+diff --git a/exp/runtime/capture/local_backend_test.py b/exp/runtime/capture/local_backend_test.py
+index 831ff6a..d9e6d1c 100644
+--- a/exp/runtime/capture/local_backend_test.py
++++ b/exp/runtime/capture/local_backend_test.py
+@@ -467,7 +467,7 @@ def test_foreground_lock_is_private_and_reused(capture_home: Path) -> None:
+     path = capture_home / "Library/Application Support/exp/capture/foreground.lock"
+     with local_backend.capture_instance():
+         metadata = path.stat()
+-        assert stat.S_IMODE(metadata.st_mode) == 0o600
++        assert (os.name == "nt" or stat.S_IMODE(metadata.st_mode) == 0o600)
+         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+     assert path.is_file()
+     with local_backend.capture_instance():
+diff --git a/exp/runtime/gateway/auth.py b/exp/runtime/gateway/auth.py
+index be44ca2..55067e1 100644
+--- a/exp/runtime/gateway/auth.py
++++ b/exp/runtime/gateway/auth.py
+@@ -130,7 +130,7 @@ class FingerprintPepperFile:
+             metadata = self._path.lstat()
+         except FileNotFoundError as exc:
+             raise GatewayAuthError("virtual-key fingerprint pepper is missing") from exc
+-        if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
++        if not stat.S_ISREG(metadata.st_mode) or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600):
+             raise GatewayAuthError(
+                 "virtual-key fingerprint pepper must be a regular mode-0600 file"
+             )
+diff --git a/exp/runtime/gateway/snapshot_file.py b/exp/runtime/gateway/snapshot_file.py
+index 32cf9e0..1117d75 100644
+--- a/exp/runtime/gateway/snapshot_file.py
++++ b/exp/runtime/gateway/snapshot_file.py
+@@ -68,13 +68,13 @@ def _snapshot_observation(
+         try:
+             for part in relative.parts[:-1]:
+                 child = os.open(
+-                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directories[-1]
++                    part, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directories[-1]
+                 )
+                 directories.append(child)
+                 identities.append(_handle_identity(child))
+             descriptor = os.open(
+                 relative.parts[-1],
+-                os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
++                os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0),
+                 dir_fd=directories[-1],
+             )
+         except FileNotFoundError:
+diff --git a/exp/runtime/gateway/sqlite/migrations.py b/exp/runtime/gateway/sqlite/migrations.py
+index f3722fc..4d2dca5 100644
+--- a/exp/runtime/gateway/sqlite/migrations.py
++++ b/exp/runtime/gateway/sqlite/migrations.py
+@@ -908,7 +908,7 @@ def _create_private_database_file(path: Path) -> None:
+     metadata = path.lstat()
+     if not stat.S_ISREG(metadata.st_mode):
+         raise GatewaySchemaError("gateway database path must be a regular file")
+-    if stat.S_IMODE(metadata.st_mode) & 0o077:
++    if (os.name != "nt" and (os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077)):
+         raise GatewaySchemaError("gateway database must not be group or world accessible")
+ 
+ 
+diff --git a/exp/runtime/router/journal.py b/exp/runtime/router/journal.py
+index 5f04dc6..bf79c4c 100644
+--- a/exp/runtime/router/journal.py
++++ b/exp/runtime/router/journal.py
+@@ -813,7 +813,7 @@ class RuntimeInteractionJournal:
+         _truncate_torn_tail(self.path)
+         flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+         if hasattr(os, "O_NOFOLLOW"):
+-            flags |= os.O_NOFOLLOW
++            flags |= getattr(os, "O_NOFOLLOW", 0)
+         try:
+             descriptor = os.open(self.path, flags, 0o600)
+             os.fchmod(descriptor, 0o600)
+@@ -833,7 +833,7 @@ class RuntimeInteractionJournal:
+         _truncate_torn_tail(self.spend_path)
+         flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+         if hasattr(os, "O_NOFOLLOW"):
+-            flags |= os.O_NOFOLLOW
++            flags |= getattr(os, "O_NOFOLLOW", 0)
+         try:
+             descriptor = os.open(self.spend_path, flags, 0o600)
+             os.fchmod(descriptor, 0o600)

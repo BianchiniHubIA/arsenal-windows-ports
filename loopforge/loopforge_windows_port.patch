@@ -1,0 +1,322 @@
+diff --git a/internal/httpapi/assistant_native_session.go b/internal/httpapi/assistant_native_session.go
+index ac13542..ce56d63 100644
+--- a/internal/httpapi/assistant_native_session.go
++++ b/internal/httpapi/assistant_native_session.go
+@@ -9,7 +9,6 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+-	"syscall"
+ 
+ 	"agentflow/internal/domain"
+ )
+@@ -60,11 +59,8 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
++	if err = flockLock(lock); err != nil {
+ 		_ = lock.Close()
+-		if err == syscall.EWOULDBLOCK || err == syscall.EAGAIN {
+-			return nil, errAssistantNativeBusy
+-		}
+ 		return nil, err
+ 	}
+ 	native := &assistantNativeSession{root: root, lock: lock}
+@@ -100,8 +96,7 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
+ 
+ func (n *assistantNativeSession) Close() {
+ 	if n != nil && n.lock != nil {
+-		_ = syscall.Flock(int(n.lock.Fd()), syscall.LOCK_UN)
+-		_ = n.lock.Close()
++		flockUnlock(n.lock)
+ 		n.lock = nil
+ 	}
+ }
+diff --git a/internal/preview/archive.go b/internal/preview/archive.go
+index 505a701..c1b3e99 100644
+--- a/internal/preview/archive.go
++++ b/internal/preview/archive.go
+@@ -14,7 +14,6 @@ import (
+ 	"path/filepath"
+ 	"sort"
+ 	"strings"
+-	"syscall"
+ 	"time"
+ 
+ 	"github.com/klauspost/compress/zstd"
+@@ -208,7 +207,7 @@ func rejectSpecial(path string, info os.FileInfo) error {
+ 	if info.IsDir() {
+ 		return nil
+ 	}
+-	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
++	if nlink, ok := hardlinkCount(path, info); ok && nlink > 1 {
+ 		return fmt.Errorf("%w: hardlink %s", ErrUnsupportedEntry, path)
+ 	}
+ 	return nil
+diff --git a/internal/runner/exec.go b/internal/runner/exec.go
+index 4cb4de7..3ccd8f5 100644
+--- a/internal/runner/exec.go
++++ b/internal/runner/exec.go
+@@ -9,10 +9,8 @@ import (
+ 	"io"
+ 	"os"
+ 	"os/exec"
+-	"runtime"
+ 	"strings"
+ 	"sync"
+-	"syscall"
+ 	"time"
+ 
+ 	"agentflow/internal/domain"
+@@ -463,45 +461,6 @@ func asExitError(err error, target **exec.ExitError) bool {
+ 	return false
+ }
+ 
+-// setProcessGroup puts the CLI and all of its children into a new process
+-// group so a cancel cannot leave orphaned shells or MCP servers behind.
+-func setProcessGroup(cmd *exec.Cmd) {
+-	if runtime.GOOS == "windows" {
+-		return
+-	}
+-	if cmd.SysProcAttr == nil {
+-		cmd.SysProcAttr = &syscall.SysProcAttr{}
+-	}
+-	cmd.SysProcAttr.Setpgid = true
+-}
+-
+-// terminateProcessGroup sends SIGTERM to the whole group, waits a grace
+-// period, then escalates to SIGKILL.
+-// processDone belongs to the single Wait caller; termination must not reap it.
+-func terminateProcessGroup(cmd *exec.Cmd, processDone <-chan struct{}) {
+-	select {
+-	case <-processDone:
+-		return
+-	default:
+-	}
+-	if cmd.Process == nil {
+-		return
+-	}
+-	if runtime.GOOS == "windows" {
+-		_ = cmd.Process.Kill()
+-		return
+-	}
+-	pgid := -cmd.Process.Pid
+-	_ = syscall.Kill(pgid, syscall.SIGTERM)
+-	timer := time.NewTimer(cancelGrace)
+-	defer timer.Stop()
+-	select {
+-	case <-processDone:
+-	case <-timer.C:
+-		_ = syscall.Kill(pgid, syscall.SIGKILL)
+-	}
+-}
+-
+ func upsertProcessEnv(env []string, key, value string) []string {
+ 	prefix := key + "="
+ 	out := make([]string, 0, len(env)+1)
+diff --git a/internal/runtime/browser.go b/internal/runtime/browser.go
+index 090fef0..865e26b 100644
+--- a/internal/runtime/browser.go
++++ b/internal/runtime/browser.go
+@@ -7,7 +7,6 @@ import (
+ 	"embed"
+ 	"encoding/hex"
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"io/fs"
+ 	"net/http"
+@@ -328,7 +327,7 @@ func ensureHostBrowser(ctx context.Context, workspace, runID string) (domain.MCP
+ 			args = append(args, "--no-sandbox", "--disable-dev-shm-usage")
+ 		}
+ 		cmd := exec.Command(binary, append(args, "about:blank")...)
+-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++		cmd.SysProcAttr = processGroupAttr()
+ 		if err := cmd.Start(); err != nil {
+ 			return domain.MCPServerDefinition{}, fmt.Errorf("启动 Chromium 失败: %w", err)
+ 		}
+@@ -385,11 +384,11 @@ func waitDevToolsActivePort(ctx context.Context, profile string, exited <-chan s
+ 
+ func (b *hostBrowser) stop() {
+ 	if b.cmd.Process != nil {
+-		_ = syscall.Kill(-b.cmd.Process.Pid, syscall.SIGTERM)
++		killProcessGroup(b.cmd.Process.Pid, syscall.SIGTERM)
+ 		select {
+ 		case <-b.exited:
+ 		case <-time.After(3 * time.Second):
+-			_ = syscall.Kill(-b.cmd.Process.Pid, syscall.SIGKILL)
++			killProcessGroup(b.cmd.Process.Pid, syscall.SIGKILL)
+ 		}
+ 	}
+ 	_ = os.RemoveAll(b.dir)
+@@ -458,17 +457,12 @@ func reapOrphanHostBrowsers() {
+ 			continue
+ 		}
+ 		if record.PID > 0 && processAlive(record.PID) {
+-			_ = syscall.Kill(-record.PID, syscall.SIGKILL)
++			killProcessGroup(record.PID, syscall.SIGKILL)
+ 		}
+ 		_ = os.RemoveAll(dir)
+ 	}
+ }
+ 
+-func processAlive(pid int) bool {
+-	err := syscall.Kill(pid, 0)
+-	return err == nil || errors.Is(err, syscall.EPERM)
+-}
+-
+ // FindChromium locates a Chromium-family binary for host drivers.
+ func FindChromium() (string, error) {
+ 	if path := strings.TrimSpace(os.Getenv("AGENTFLOW_CHROMIUM")); path != "" {
+@@ -507,7 +501,7 @@ func FindChromium() (string, error) {
+ func lookupBrowserEndpoint(ctx context.Context, runID string) (browserEndpoint, bool) {
+ 	if raw, err := os.ReadFile(filepath.Join(hostBrowserDir(runID), "endpoint.json")); err == nil {
+ 		var record hostBrowserRecord
+-		if json.Unmarshal(raw, &record) == nil && record.PID > 0 && syscall.Kill(record.PID, 0) == nil && hostDevToolsAlive(ctx, record.Port) {
++		if json.Unmarshal(raw, &record) == nil && record.PID > 0 && processAlive(record.PID) && hostDevToolsAlive(ctx, record.Port) {
+ 			return browserEndpoint{Kind: "local", WebSocket: record.WebSocket}, true
+ 		}
+ 	}
+diff --git a/internal/runtime/browser_agent_test.go b/internal/runtime/browser_agent_test.go
+index 9b45288..2336e6b 100644
+--- a/internal/runtime/browser_agent_test.go
++++ b/internal/runtime/browser_agent_test.go
+@@ -24,7 +24,7 @@ func TestReapOrphanHostBrowsersKillsBrowsersOfDeadOwners(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	orphan := exec.Command("sleep", "60")
+-	orphan.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++	orphan.SysProcAttr = processGroupAttr()
+ 	if err := orphan.Start(); err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/internal/runtime/workspace_lock.go b/internal/runtime/workspace_lock.go
+index c82dae1..b3865df 100644
+--- a/internal/runtime/workspace_lock.go
++++ b/internal/runtime/workspace_lock.go
+@@ -4,8 +4,6 @@ import (
+ 	"context"
+ 	"os"
+ 	"path/filepath"
+-	"syscall"
+-	"time"
+ )
+ 
+ const sandboxLockDir = ".locks"
+@@ -29,45 +27,14 @@ func (m *Manager) acquireLock(ctx context.Context, id string) (*os.File, error)
+ 	return f, nil
+ }
+ 
+-func flockExclusive(ctx context.Context, f *os.File) error {
+-	for {
+-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+-		if err == nil {
+-			return nil
+-		}
+-		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+-			return err
+-		}
+-		select {
+-		case <-ctx.Done():
+-			return ctx.Err()
+-		case <-time.After(50 * time.Millisecond):
+-		}
+-	}
+-}
+-
+-func unlockFile(f *os.File) error {
+-	if f == nil {
+-		return nil
+-	}
+-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+-	return f.Close()
+-}
+-
+ func (m *Manager) workspaceInUse(name string) bool {
+ 	if m == nil || name == "" || name == sandboxLockDir {
+ 		return false
+ 	}
+-	path := m.lockPath(name)
+-	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
++	f, err := os.OpenFile(m.lockPath(name), os.O_RDWR, 0o600)
+ 	if err != nil {
+ 		return false
+ 	}
+ 	defer f.Close()
+-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+-	if err != nil {
+-		return true
+-	}
+-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+-	return false
++	return fileLocked(f)
+ }
+diff --git a/internal/runtime/workspace_terminal.go b/internal/runtime/workspace_terminal.go
+index 6b2ca72..334aa03 100644
+--- a/internal/runtime/workspace_terminal.go
++++ b/internal/runtime/workspace_terminal.go
+@@ -9,12 +9,10 @@ import (
+ 	"os/exec"
+ 	"strings"
+ 	"sync"
+-	"syscall"
+ 	"time"
+ 
+ 	"agentflow/internal/domain"
+ 	"github.com/creack/pty"
+-	"golang.org/x/sys/unix"
+ )
+ 
+ // TerminalPool owns transient PTYs on the machine that owns the workspace.
+@@ -227,15 +225,7 @@ func terminalSize(req domain.WorkspaceTerminalRequest) *pty.Winsize {
+ }
+ func (s *workspaceTerminal) stop() {
+ 	s.once.Do(func() {
+-		fg, _ := unix.IoctlGetInt(int(s.file.Fd()), unix.TIOCGPGRP)
+-		// Closing the controlling PTY also hangs up the foreground process group.
+-		syscall.Kill(-s.cmd.Process.Pid, syscall.SIGHUP)
+-		s.file.Close()
+-		time.Sleep(100 * time.Millisecond)
+-		if fg > 0 {
+-			syscall.Kill(-fg, syscall.SIGKILL)
+-		}
+-		syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
++		terminalStopImpl(s)
+ 		if s.release != nil {
+ 			s.release()
+ 		}
+diff --git a/internal/runtime/workspace_terminal_sandbox.go b/internal/runtime/workspace_terminal_sandbox.go
+index ce76e19..72669b6 100644
+--- a/internal/runtime/workspace_terminal_sandbox.go
++++ b/internal/runtime/workspace_terminal_sandbox.go
+@@ -12,7 +12,6 @@ import (
+ 	"path/filepath"
+ 	"strings"
+ 	"sync"
+-	"syscall"
+ 	"time"
+ )
+ 
+@@ -198,9 +197,9 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
+ 	if err != nil {
+ 		return "", err
+ 	}
+-	stat, ok := info.Sys().(*syscall.Stat_t)
+-	if !ok {
+-		return "", fmt.Errorf("workspace filesystem identity unavailable")
++	dev, ino, err := fsIdentity(workspace, info)
++	if err != nil {
++		return "", fmt.Errorf("workspace filesystem identity unavailable: %w", err)
+ 	}
+ 	data, err := json.Marshal(struct {
+ 		Driver       string
+@@ -209,7 +208,7 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
+ 		Inode        uint64
+ 		Environment  map[string]string
+ 		ProcessEpoch string
+-	}{driver, filepath.Clean(workspace), uint64(stat.Dev), stat.Ino, environment, terminalProcessEnvironmentEpoch()})
++	}{driver, filepath.Clean(workspace), dev, ino, environment, terminalProcessEnvironmentEpoch()})
+ 	if err != nil {
+ 		return "", err
+ 	}
