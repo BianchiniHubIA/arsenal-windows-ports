@@ -1,5 +1,57 @@
+diff --git a/go.mod b/go.mod
+index 2704c93..3f8cf1d 100644
+--- a/go.mod
++++ b/go.mod
+@@ -11,9 +11,9 @@ require (
+ 	github.com/gorilla/websocket v1.5.3
+ 	github.com/klauspost/compress v1.20.3
+ 	github.com/zalando/go-keyring v0.2.8
+-	golang.org/x/crypto v0.58.0
++	golang.org/x/crypto v0.59.0
+ 	golang.org/x/net v0.62.0
+-	golang.org/x/sys v0.49.0
++	golang.org/x/sys v0.50.0
+ 	gorm.io/driver/mysql v1.6.0
+ 	gorm.io/gorm v1.31.2
+ )
+@@ -51,7 +51,7 @@ require (
+ 	github.com/ugorji/go/codec v1.3.1 // indirect
+ 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
+ 	golang.org/x/arch v0.22.0 // indirect
+-	golang.org/x/text v0.43.0 // indirect
++	golang.org/x/text v0.44.0 // indirect
+ 	google.golang.org/protobuf v1.36.10 // indirect
+ 	modernc.org/libc v1.22.5 // indirect
+ 	modernc.org/mathutil v1.5.0 // indirect
+diff --git a/go.sum b/go.sum
+index 6cc1831..79e190a 100644
+--- a/go.sum
++++ b/go.sum
+@@ -110,15 +110,22 @@ golang.org/x/arch v0.22.0 h1:c/Zle32i5ttqRXjdLyyHZESLD/bB90DCU1g9l/0YBDI=
+ golang.org/x/arch v0.22.0/go.mod h1:dNHoOeKiyja7GTvF9NJS1l3Z2yntpQNzgrjh1cU103A=
+ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
++golang.org/x/crypto v0.59.0 h1:xS2jhqYbzNrpvkWP2YTDf4TJwBy3ykR03i8vFDxEc7c=
++golang.org/x/crypto v0.59.0/go.mod h1:veDyUwATGs3c+vN3VfTbzViMGXeTBk3WyhBOkn+F/4U=
+ golang.org/x/net v0.62.0 h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=
+ golang.org/x/net v0.62.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
+ golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/sys v0.50.0 h1:dkKZEFTEKaLr1sjhs0WiKqoi8Jj5nHbS3Njmx1UoMJs=
++golang.org/x/sys v0.50.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+ golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=
+ golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=
++golang.org/x/term v0.48.0 h1:G6UU1eiSB8nl3DzeUGt7Mg+2SctI8tPS6Z5/mBt6cOk=
+ golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
+ golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
++golang.org/x/text v0.44.0 h1:YItdp/mQNGnsmrgpcdA5yQ3bnRxCfo/Tj/iByGW9GGo=
++golang.org/x/text v0.44.0/go.mod h1:S4FR1waQ9LbjQTls97SyRjDaUUVkaM+cXwwuG/G+MwY=
+ google.golang.org/protobuf v1.36.10 h1:AYd7cD/uASjIL6Q9LiTjz8JLcrh/88q5UObnmY3aOOE=
+ google.golang.org/protobuf v1.36.10/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 diff --git a/internal/httpapi/assistant_native_session.go b/internal/httpapi/assistant_native_session.go
-index ac13542..ce56d63 100644
+index a450f6b..bb5b5d7 100644
 --- a/internal/httpapi/assistant_native_session.go
 +++ b/internal/httpapi/assistant_native_session.go
 @@ -9,7 +9,6 @@ import (
@@ -9,8 +61,8 @@ index ac13542..ce56d63 100644
 -	"syscall"
  
  	"agentflow/internal/domain"
- )
-@@ -60,11 +59,8 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
+ 	"agentflow/internal/runtime"
+@@ -67,11 +66,8 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
  	if err != nil {
  		return nil, err
  	}
@@ -23,7 +75,7 @@ index ac13542..ce56d63 100644
  		return nil, err
  	}
  	native := &assistantNativeSession{root: root, lock: lock}
-@@ -100,8 +96,7 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
+@@ -110,8 +106,7 @@ func openAssistantNativeSession(req assistantRequest, saved domain.AssistantSess
  
  func (n *assistantNativeSession) Close() {
  	if n != nil && n.lock != nil {
@@ -34,18 +86,18 @@ index ac13542..ce56d63 100644
  	}
  }
 diff --git a/internal/preview/archive.go b/internal/preview/archive.go
-index 505a701..c1b3e99 100644
+index 3604766..63dd7ed 100644
 --- a/internal/preview/archive.go
 +++ b/internal/preview/archive.go
-@@ -14,7 +14,6 @@ import (
- 	"path/filepath"
+@@ -15,7 +15,6 @@ import (
+ 	"slices"
  	"sort"
  	"strings"
 -	"syscall"
  	"time"
  
  	"github.com/klauspost/compress/zstd"
-@@ -208,7 +207,7 @@ func rejectSpecial(path string, info os.FileInfo) error {
+@@ -213,7 +212,7 @@ func rejectSpecial(path string, info os.FileInfo) error {
  	if info.IsDir() {
  		return nil
  	}
@@ -116,7 +168,7 @@ index 4cb4de7..3ccd8f5 100644
  	prefix := key + "="
  	out := make([]string, 0, len(env)+1)
 diff --git a/internal/runtime/browser.go b/internal/runtime/browser.go
-index 090fef0..865e26b 100644
+index 7ef587b..7ff94d8 100644
 --- a/internal/runtime/browser.go
 +++ b/internal/runtime/browser.go
 @@ -7,7 +7,6 @@ import (
@@ -127,7 +179,7 @@ index 090fef0..865e26b 100644
  	"fmt"
  	"io/fs"
  	"net/http"
-@@ -328,7 +327,7 @@ func ensureHostBrowser(ctx context.Context, workspace, runID string) (domain.MCP
+@@ -347,7 +346,7 @@ func ensureHostBrowser(ctx context.Context, workspace, runID string) (domain.MCP
  			args = append(args, "--no-sandbox", "--disable-dev-shm-usage")
  		}
  		cmd := exec.Command(binary, append(args, "about:blank")...)
@@ -136,7 +188,7 @@ index 090fef0..865e26b 100644
  		if err := cmd.Start(); err != nil {
  			return domain.MCPServerDefinition{}, fmt.Errorf("启动 Chromium 失败: %w", err)
  		}
-@@ -385,11 +384,11 @@ func waitDevToolsActivePort(ctx context.Context, profile string, exited <-chan s
+@@ -404,11 +403,11 @@ func waitDevToolsActivePort(ctx context.Context, profile string, exited <-chan s
  
  func (b *hostBrowser) stop() {
  	if b.cmd.Process != nil {
@@ -150,7 +202,7 @@ index 090fef0..865e26b 100644
  		}
  	}
  	_ = os.RemoveAll(b.dir)
-@@ -458,17 +457,12 @@ func reapOrphanHostBrowsers() {
+@@ -477,17 +476,12 @@ func reapOrphanHostBrowsers() {
  			continue
  		}
  		if record.PID > 0 && processAlive(record.PID) {
@@ -169,13 +221,13 @@ index 090fef0..865e26b 100644
  // FindChromium locates a Chromium-family binary for host drivers.
  func FindChromium() (string, error) {
  	if path := strings.TrimSpace(os.Getenv("AGENTFLOW_CHROMIUM")); path != "" {
-@@ -507,7 +501,7 @@ func FindChromium() (string, error) {
+@@ -526,7 +520,7 @@ func FindChromium() (string, error) {
  func lookupBrowserEndpoint(ctx context.Context, runID string) (browserEndpoint, bool) {
  	if raw, err := os.ReadFile(filepath.Join(hostBrowserDir(runID), "endpoint.json")); err == nil {
  		var record hostBrowserRecord
 -		if json.Unmarshal(raw, &record) == nil && record.PID > 0 && syscall.Kill(record.PID, 0) == nil && hostDevToolsAlive(ctx, record.Port) {
 +		if json.Unmarshal(raw, &record) == nil && record.PID > 0 && processAlive(record.PID) && hostDevToolsAlive(ctx, record.Port) {
- 			return browserEndpoint{Kind: "local", WebSocket: record.WebSocket}, true
+ 			return browserEndpoint{Kind: "local", WebSocket: record.WebSocket, Workspace: record.Workspace}, true
  		}
  	}
 diff --git a/internal/runtime/browser_agent_test.go b/internal/runtime/browser_agent_test.go
@@ -191,6 +243,136 @@ index 9b45288..2336e6b 100644
  	if err := orphan.Start(); err != nil {
  		t.Fatal(err)
  	}
+diff --git a/internal/runtime/git_isolation.go b/internal/runtime/git_isolation.go
+index b9639d0..a659292 100644
+--- a/internal/runtime/git_isolation.go
++++ b/internal/runtime/git_isolation.go
+@@ -12,7 +12,6 @@ import (
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+-	"syscall"
+ 	"time"
+ 
+ 	"agentflow/internal/domain"
+@@ -301,8 +300,8 @@ func gitIndexLockHeldUnder(procRoot, lockPath string, self uint32) (inUse, confi
+ 	if err != nil {
+ 		return false, false, err
+ 	}
+-	stat, ok := lock.Sys().(*syscall.Stat_t)
+-	if !lock.Mode().IsRegular() || !ok {
++	owner, hasOwner := fileOwnerUid(lock)
++	if !lock.Mode().IsRegular() || !hasOwner {
+ 		return false, false, fmt.Errorf("index lock %s is not a regular file", want)
+ 	}
+ 	entries, err := os.ReadDir(procRoot)
+@@ -310,7 +309,7 @@ func gitIndexLockHeldUnder(procRoot, lockPath string, self uint32) (inUse, confi
+ 		return false, false, err
+ 	}
+ 	uncertain := false
+-	foreignOwner := stat.Uid != self
++	foreignOwner := owner != self
+ 	for _, entry := range entries {
+ 		if !entry.IsDir() {
+ 			continue
+@@ -320,7 +319,7 @@ func gitIndexLockHeldUnder(procRoot, lockPath string, self uint32) (inUse, confi
+ 		}
+ 		held, readErr := fdDirHoldsFile(filepath.Join(procRoot, entry.Name(), "fd"), want, lock)
+ 		if readErr != nil {
+-			if foreignOwner && !errors.Is(readErr, os.ErrNotExist) && procMayOwnFile(filepath.Join(procRoot, entry.Name()), stat.Uid) {
++			if foreignOwner && !errors.Is(readErr, os.ErrNotExist) && procMayOwnFile(filepath.Join(procRoot, entry.Name()), owner) {
+ 				uncertain = true
+ 			}
+ 			continue
+diff --git a/internal/runtime/process.go b/internal/runtime/process.go
+index 5be912f..5f26753 100644
+--- a/internal/runtime/process.go
++++ b/internal/runtime/process.go
+@@ -71,8 +71,8 @@ func runCommand(cmd *exec.Cmd, sink EventSink, commands ...CommandSpec) (string,
+ 		}
+ 		err = fmt.Errorf("%w: %w", errProcessNotStarted, err)
+ 	}
+-	if cmd.Process != nil && cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid {
+-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
++	if cmd.Process != nil {
++		killRemainingProcess(cmd)
+ 	}
+ 	outputIncomplete := errors.Is(err, exec.ErrWaitDelay)
+ 	if errors.Is(err, exec.ErrWaitDelay) {
+diff --git a/internal/runtime/runner_login_manager.go b/internal/runtime/runner_login_manager.go
+index dc23817..1ba8d20 100644
+--- a/internal/runtime/runner_login_manager.go
++++ b/internal/runtime/runner_login_manager.go
+@@ -15,7 +15,6 @@ import (
+ 	"path/filepath"
+ 	"strings"
+ 	"sync"
+-	"syscall"
+ 	"time"
+ )
+ 
+@@ -257,10 +256,10 @@ func (m *runnerLoginManager) locked(ctx context.Context, source runnerLoginSourc
+ 	}
+ 	defer file.Close()
+ 	for {
+-		if err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
++		if err = flockLock(file); err == nil {
+ 			break
+ 		}
+-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
++		if !isLockBusy(err) {
+ 			return runnerLoginSnapshot{}, err
+ 		}
+ 		select {
+@@ -269,7 +268,7 @@ func (m *runnerLoginManager) locked(ctx context.Context, source runnerLoginSourc
+ 		case <-time.After(25 * time.Millisecond):
+ 		}
+ 	}
+-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
++	defer flockUnlockFile(file)
+ 	return fn(e, path+".pending")
+ }
+ 
+diff --git a/internal/runtime/sandbox_local.go b/internal/runtime/sandbox_local.go
+index bd526c5..1312e19 100644
+--- a/internal/runtime/sandbox_local.go
++++ b/internal/runtime/sandbox_local.go
+@@ -58,12 +58,13 @@ func (s *localSandbox) command(ctx context.Context, command CommandSpec, base []
+ 		cmd.Env = upsertEnv(cmd.Env, "PWD", command.WorkingDir)
+ 	}
+ 	if command.OwnProcessGroup {
+-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++		cmd.SysProcAttr = processGroupAttr()
+ 		cmd.Cancel = func() error {
+ 			if cmd.Process == nil {
+ 				return nil
+ 			}
+-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
++			killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
++			return nil
+ 		}
+ 	}
+ 	return cmd, nil
+diff --git a/internal/runtime/sandbox_process.go b/internal/runtime/sandbox_process.go
+index f41bcef..f8c6665 100644
+--- a/internal/runtime/sandbox_process.go
++++ b/internal/runtime/sandbox_process.go
+@@ -196,12 +196,13 @@ func (s *processSandbox) command(ctx context.Context, command CommandSpec, base
+ 	if command.OwnProcessGroup {
+ 		// A conversation CLI is stopped with its whole process group; bwrap's
+ 		// own PID namespace then takes every descendant down with it.
+-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++		cmd.SysProcAttr = processGroupAttr()
+ 		cmd.Cancel = func() error {
+ 			if cmd.Process == nil {
+ 				return nil
+ 			}
+-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
++			killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
++			return nil
+ 		}
+ 	}
+ 	switch s.driver {
 diff --git a/internal/runtime/workspace_lock.go b/internal/runtime/workspace_lock.go
 index c82dae1..b3865df 100644
 --- a/internal/runtime/workspace_lock.go
@@ -253,7 +435,7 @@ index c82dae1..b3865df 100644
 +	return fileLocked(f)
  }
 diff --git a/internal/runtime/workspace_terminal.go b/internal/runtime/workspace_terminal.go
-index 6b2ca72..334aa03 100644
+index fb8d890..aabcecb 100644
 --- a/internal/runtime/workspace_terminal.go
 +++ b/internal/runtime/workspace_terminal.go
 @@ -9,12 +9,10 @@ import (
@@ -269,7 +451,7 @@ index 6b2ca72..334aa03 100644
  )
  
  // TerminalPool owns transient PTYs on the machine that owns the workspace.
-@@ -227,15 +225,7 @@ func terminalSize(req domain.WorkspaceTerminalRequest) *pty.Winsize {
+@@ -252,15 +250,7 @@ func terminalSize(req domain.WorkspaceTerminalRequest) *pty.Winsize {
  }
  func (s *workspaceTerminal) stop() {
  	s.once.Do(func() {
@@ -287,7 +469,7 @@ index 6b2ca72..334aa03 100644
  			s.release()
  		}
 diff --git a/internal/runtime/workspace_terminal_sandbox.go b/internal/runtime/workspace_terminal_sandbox.go
-index ce76e19..72669b6 100644
+index 3c687f8..4e3e7ef 100644
 --- a/internal/runtime/workspace_terminal_sandbox.go
 +++ b/internal/runtime/workspace_terminal_sandbox.go
 @@ -12,7 +12,6 @@ import (
@@ -296,9 +478,9 @@ index ce76e19..72669b6 100644
  	"sync"
 -	"syscall"
  	"time"
- )
  
-@@ -198,9 +197,9 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
+ 	"agentflow/internal/domain"
+@@ -225,9 +224,9 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
  	if err != nil {
  		return "", err
  	}
@@ -311,7 +493,7 @@ index ce76e19..72669b6 100644
  	}
  	data, err := json.Marshal(struct {
  		Driver       string
-@@ -209,7 +208,7 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
+@@ -236,7 +235,7 @@ func filesystemEnvironmentIdentity(workspace, driver string, environment map[str
  		Inode        uint64
  		Environment  map[string]string
  		ProcessEpoch string

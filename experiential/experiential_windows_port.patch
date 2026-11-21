@@ -1,35 +1,109 @@
 diff --git a/exp/cli/gateway/key_output.py b/exp/cli/gateway/key_output.py
-index 4480ed7..483fd4a 100644
+index 4480ed7..b9a4035 100644
 --- a/exp/cli/gateway/key_output.py
 +++ b/exp/cli/gateway/key_output.py
-@@ -141,7 +141,7 @@ def deliver_key_output(
+@@ -22,6 +22,10 @@ from exp.runtime.gateway.sqlite.store import SQLiteGatewayStore
+ 
+ _KEY_OUTPUT_LENGTH: Literal[64] = 64
+ 
++# Windows: o CRT abre arquivos em modo texto por padrao e traduz \n -> \r\n.
++# O_BINARY desliga a traducao; no Linux getattr retorna 0 (sem efeito).
++_O_BINARY = getattr(os, "O_BINARY", 0)
++
+ 
+ class KeyOutputRecoveryError(ValueError):
+     """Durable key-output state cannot be safely reconciled automatically."""
+@@ -141,7 +145,7 @@ def deliver_key_output(
      try:
          descriptor = os.open(
              reservation,
 -            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
++            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY,
              0o600,
          )
          created = os.fstat(descriptor)
-@@ -359,7 +359,7 @@ def key_output_marker_path(path: Path) -> Path:
+@@ -156,24 +160,29 @@ def deliver_key_output(
+             target_inode=created.st_ino,
+         )
+         marker_identity = _write_marker_once(marker_path, marker)
+-        os.link(reservation, path, follow_symlinks=False)
+-        target_linked = True
+-        _fsync_directory(path.parent)
+-        reservation_identity = _recorded_inode_identity(reservation, marker)
+-        if reservation_identity is None or reservation_identity.size != 0:
+-            raise KeyOutputRecoveryError("key output reservation changed before publication")
+-        _unlink_exact_inode(reservation, reservation_identity)
+-        _fsync_directory(reservation.parent)
++        # Windows: escreve o segredo completo antes de publicar o link, fecha o
++        # handle (DeleteFile falha com handle aberto no Windows) e so entao
++        # publica o path. O path so nasce com o conteudo pronto e fsync'ado.
+         written = 0
+         while written < len(payload):
+             count = os.write(descriptor, payload[written:])
+             if count == 0:
+                 raise OSError("secret output write made no progress")
+             written += count
+-        os.fchmod(descriptor, 0o600)
++        if os.name != "nt":
++            os.fchmod(descriptor, 0o600)
+         os.fsync(descriptor)
+         os.close(descriptor)
+         descriptor = -1
++        os.link(reservation, path, follow_symlinks=False)
++        target_linked = True
++        _fsync_directory(path.parent)
++        # Recaptura a identidade pos-link: o hardlink muda o ctime no Windows.
++        reservation_identity = _recorded_inode_identity(reservation, marker)
++        if reservation_identity is None or reservation_identity.size != len(payload):
++            raise KeyOutputRecoveryError("key output reservation changed before publication")
++        _unlink_exact_inode(reservation, reservation_identity)
++        _fsync_directory(reservation.parent)
+         _fsync_directory(path.parent)
+     except BaseException as publication_error:
+         if descriptor >= 0:
+@@ -359,7 +368,7 @@ def key_output_marker_path(path: Path) -> Path:
  def _write_marker_once(path: Path, marker: _KeyOutputMarker) -> _FileIdentity:
      """Atomically persist one private marker without replacing prior evidence."""
      staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
 -    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-+    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
++    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY, 0o600)
      try:
          payload = canonical_json_bytes(marker) + b"\n"
          written = 0
-@@ -419,7 +419,7 @@ def _exact_output_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdentit
+@@ -368,14 +377,21 @@ def _write_marker_once(path: Path, marker: _KeyOutputMarker) -> _FileIdentity:
+             if count == 0:
+                 raise OSError("key output marker write made no progress")
+             written += count
+-        os.fchmod(descriptor, 0o600)
++        if os.name != "nt":
++            os.fchmod(descriptor, 0o600)
+         os.fsync(descriptor)
+-        identity = _identity_from_stat(os.fstat(descriptor))
+         os.close(descriptor)
+         descriptor = -1
+         os.link(staging, path, follow_symlinks=False)
+         staging.unlink()
+         _fsync_directory(path.parent)
++        # Windows: o hardlink e o unlink do staging mudam o ctime; recaptura a
++        # identidade final pelo mesmo caminho usado no _require_exact_inode.
++        identity_descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY)
++        try:
++            identity = _identity_from_stat(os.fstat(identity_descriptor))
++        finally:
++            os.close(identity_descriptor)
+         return identity
+     except BaseException:
+         if descriptor >= 0:
+@@ -419,7 +435,7 @@ def _exact_output_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdentit
  def _recorded_inode_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdentity | None:
      """Return one bounded private file matching the recorded reservation inode."""
      try:
 -        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
++        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY)
          try:
              metadata = os.fstat(descriptor)
          finally:
-@@ -428,7 +428,7 @@ def _recorded_inode_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdent
+@@ -428,7 +444,7 @@ def _recorded_inode_identity(path: Path, marker: _KeyOutputMarker) -> _FileIdent
          return None
      if (
          not stat.S_ISREG(metadata.st_mode)
@@ -38,12 +112,12 @@ index 4480ed7..483fd4a 100644
          or metadata.st_size > marker.output_length
          or (metadata.st_dev, metadata.st_ino) != (marker.target_device, marker.target_inode)
      ):
-@@ -457,10 +457,10 @@ def _read_private_regular(
+@@ -457,10 +473,10 @@ def _read_private_regular(
      maximum_length: int,
  ) -> tuple[bytes, _FileIdentity]:
      """Read bounded bytes and identity from the same private no-follow descriptor."""
 -    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
++    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY)
      try:
          metadata = os.fstat(descriptor)
 -        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
@@ -51,6 +125,28 @@ index 4480ed7..483fd4a 100644
              raise KeyOutputRecoveryError("key output state is not a private regular file")
          if metadata.st_size > maximum_length:
              raise KeyOutputRecoveryError("key output state exceeds its expected size")
+@@ -485,7 +501,11 @@ def _unlink_exact_inode(path: Path, identity: _FileIdentity) -> None:
+ 
+ def _require_exact_inode(path: Path, identity: _FileIdentity) -> None:
+     """Require a final no-follow stat to retain every verified file attribute."""
+-    metadata = os.stat(path, follow_symlinks=False)
++    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | _O_BINARY)
++    try:
++        metadata = os.fstat(descriptor)
++    finally:
++        os.close(descriptor)
+     if not stat.S_ISREG(metadata.st_mode) or (
+         metadata.st_dev,
+         metadata.st_ino,
+@@ -525,6 +545,8 @@ def _target_path_sha256(path: Path) -> Sha256:
+ 
+ def _fsync_directory(path: Path) -> None:
+     """Durably persist one directory mutation or raise."""
++    if os.name == "nt":
++        return  # Windows: directory handles are not openable; the rename itself landed
+     descriptor = os.open(path, os.O_RDONLY)
+     try:
+         os.fsync(descriptor)
 diff --git a/exp/common/core/files.py b/exp/common/core/files.py
 index 61f0e88..240187d 100644
 --- a/exp/common/core/files.py
@@ -129,10 +225,10 @@ index 713fef5..eddb938 100644
                      if not stat.S_ISREG(os.fstat(existing).st_mode) or (
                          _read_file_descriptor(existing) != payload
 diff --git a/exp/common/project/bundle.py b/exp/common/project/bundle.py
-index e4af721..6728f40 100644
+index e9ffcb9..84ddf75 100644
 --- a/exp/common/project/bundle.py
 +++ b/exp/common/project/bundle.py
-@@ -886,7 +886,7 @@ def _open_regular_file(path: Path) -> Iterator[BinaryIO]:
+@@ -900,7 +900,7 @@ def _open_regular_file(path: Path) -> Iterator[BinaryIO]:
      if not hasattr(os, "O_NOFOLLOW"):
          raise ProjectBundleError("secure bundle reads require O_NOFOLLOW")
      try:
@@ -142,12 +238,12 @@ index e4af721..6728f40 100644
          raise ProjectBundleError(f"Project bundle is missing or unsafe: {path}") from exc
      try:
 diff --git a/exp/common/project/database.py b/exp/common/project/database.py
-index 8924a08..8cff450 100644
+index 6b97fea..12c8850 100644
 --- a/exp/common/project/database.py
 +++ b/exp/common/project/database.py
-@@ -53,13 +53,13 @@ def _create_database(path: Path) -> None:
-     if path.parent.is_symlink():
+@@ -60,13 +60,13 @@ def _create_database(path: Path) -> None:
          raise ValueError("Content database directory must not be a symlink.")
+     require_host_scope(path.parent)
      try:
 -        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
 +        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -162,7 +258,7 @@ index 8924a08..8cff450 100644
  
  
 diff --git a/exp/runtime/capture/local_backend_test.py b/exp/runtime/capture/local_backend_test.py
-index 831ff6a..d9e6d1c 100644
+index 97e544a..e0f2e69 100644
 --- a/exp/runtime/capture/local_backend_test.py
 +++ b/exp/runtime/capture/local_backend_test.py
 @@ -467,7 +467,7 @@ def test_foreground_lock_is_private_and_reused(capture_home: Path) -> None:
@@ -174,6 +270,22 @@ index 831ff6a..d9e6d1c 100644
          assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
      assert path.is_file()
      with local_backend.capture_instance():
+diff --git a/exp/runtime/environments/containment/linux.py b/exp/runtime/environments/containment/linux.py
+index 545fa69..df3b543 100644
+--- a/exp/runtime/environments/containment/linux.py
++++ b/exp/runtime/environments/containment/linux.py
+@@ -32,7 +32,10 @@ from exp.runtime.environments.containment.contract import (
+     ProcessLaunch,
+     close_fd,
+ )
+-from exp.runtime.environments.containment.linux_gate import MINIMUM_LANDLOCK_ABI
++if sys.platform != "win32":
++    from exp.runtime.environments.containment.linux_gate import MINIMUM_LANDLOCK_ABI
++else:
++    MINIMUM_LANDLOCK_ABI = 0  # Windows: Landlock gate is Linux-only; containment uses the local-process path
+ 
+ LINUX_CONTAINMENT_PROTOCOL = "linux-namespaces-v3"
+ _GATE_PROGRAM = Path(__file__).with_name("linux_gate.py")
 diff --git a/exp/runtime/gateway/auth.py b/exp/runtime/gateway/auth.py
 index be44ca2..55067e1 100644
 --- a/exp/runtime/gateway/auth.py
@@ -208,10 +320,10 @@ index 32cf9e0..1117d75 100644
              )
          except FileNotFoundError:
 diff --git a/exp/runtime/gateway/sqlite/migrations.py b/exp/runtime/gateway/sqlite/migrations.py
-index f3722fc..4d2dca5 100644
+index 6bec684..4bb808f 100644
 --- a/exp/runtime/gateway/sqlite/migrations.py
 +++ b/exp/runtime/gateway/sqlite/migrations.py
-@@ -908,7 +908,7 @@ def _create_private_database_file(path: Path) -> None:
+@@ -926,7 +926,7 @@ def _create_private_database_file(path: Path) -> None:
      metadata = path.lstat()
      if not stat.S_ISREG(metadata.st_mode):
          raise GatewaySchemaError("gateway database path must be a regular file")
@@ -242,3 +354,94 @@ index 5f04dc6..bf79c4c 100644
          try:
              descriptor = os.open(self.spend_path, flags, 0o600)
              os.fchmod(descriptor, 0o600)
+diff --git a/uv.lock b/uv.lock
+index f37e190..c6f556f 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1,5 +1,5 @@
+ version = 1
+-revision = 3
++revision = 5
+ requires-python = ">=3.12"
+ resolution-markers = [
+     "python_full_version >= '3.14' and sys_platform == 'win32'",
+@@ -15,12 +15,12 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for
+ exclude-newer-span = "P7D"
+ 
+ [options.exclude-newer-package]
++certifi = "2026-10-21T00:00:00Z"
+ exp-gateway-native = false
+ exp-mitmproxy = false
+-certifi = "2026-10-21T00:00:00Z"
++exp-mitmproxy-rs = false
+ experiential = false
+ filelock = "2026-10-18T00:00:00Z"
+-exp-mitmproxy-rs = false
+ pyasn1 = "2026-10-28T00:00:00Z"
+ 
+ [[package]]
+@@ -930,12 +930,20 @@ wheels = [
+ [[package]]
+ name = "exp-gateway-native"
+ version = "0.3.205"
+-source = { directory = "exp/runtime/gateway/native" }
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/fb/40/9a8c91036e58b88150d8f879787851d6b7283ec4bf5a38c438996a1c362a/exp_gateway_native-0.3.205.tar.gz", hash = "sha256:dea5275849436766fff8a78bc3626f1afe77fc0b93d6e4255f80a7f0705430cd", size = 902622, upload-time = "2026-11-21T05:17:23.143Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/6d/32/b05bfbe4a838ffd83cb4e9666905e59a77bea437f6a8a39b99fb67507d28/exp_gateway_native-0.3.205-cp312-abi3-macosx_10_12_x86_64.whl", hash = "sha256:14db1455d286ba509888822f8f0daee618e8c9286b059e106529c8f9c86629a2", size = 7086294, upload-time = "2026-11-21T05:17:13.011Z" },
++    { url = "https://files.pythonhosted.org/packages/a3/49/f7c8422a666ca0c4a999996e95b0b2491fb57519cb6bbbc45841ccb83423/exp_gateway_native-0.3.205-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:12506252745aceeb2380da7939d9db28f1a08c67faa774d66179fd03ac561c86", size = 6823332, upload-time = "2026-11-21T05:17:15.237Z" },
++    { url = "https://files.pythonhosted.org/packages/d7/ee/406cb2ee9b5e735bf294bfaa0feb2f8be7dfdeb7822e62aa727f7305b1e5/exp_gateway_native-0.3.205-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:76c2ea05042f3ce2f9bb567cd7220c48e04d0ec7b3dcfaa7d4c829cd0b1913fc", size = 7297481, upload-time = "2026-11-21T05:17:17.873Z" },
++    { url = "https://files.pythonhosted.org/packages/4f/1e/16e62f7d4a4937cee29497d0800d40fb6781b3c8bb375e8d5fcd638c7feb/exp_gateway_native-0.3.205-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:aeba3e9f09e59ada2f98ed559a38423a90d3a6e933473f250f4f125066de0c64", size = 7456395, upload-time = "2026-11-21T05:17:19.63Z" },
++    { url = "https://files.pythonhosted.org/packages/4b/f7/13785cab3772e3ebe49b6eda8716a577fdf13b279ec2e9d147ac95a5e2b2/exp_gateway_native-0.3.205-cp312-abi3-win_amd64.whl", hash = "sha256:de8e07286511ff2f39149a1a735008a5a36d19b5e32c7b3fa117ab348dc3cabf", size = 7235685, upload-time = "2026-11-21T05:17:21.534Z" },
++]
+ 
+ [[package]]
+ name = "exp-mitmproxy"
+ version = "12.2.3.post3"
+-source = { git = "https://github.com/experientiallabs/mitmproxy.git?rev=a401f5af274a534c7c44be5ea3e542651970cfbc#a401f5af274a534c7c44be5ea3e542651970cfbc" }
++source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "aioquic" },
+     { name = "argon2-cffi" },
+@@ -968,16 +976,27 @@ dependencies = [
+     { name = "wsproto" },
+     { name = "zstandard" },
+ ]
++sdist = { url = "https://files.pythonhosted.org/packages/42/01/e1ebb8e9da8db86f820804aca5f0d94f8f99867497683943b7a28dadc061/exp_mitmproxy-12.2.3.post3.tar.gz", hash = "sha256:d35f0366b082847d7453bc408d81bc4ab18831b1cb91eb9f5cdeb9e4597b6ba1", size = 1556167, upload-time = "2026-11-02T00:11:56.062Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/7c/f1/60e4e72341141da3cf2623311a58699e615ccd659fbd4f8d044076a66c74/exp_mitmproxy-12.2.3.post3-py3-none-any.whl", hash = "sha256:86d4fb6fafe78693e7535ac2f96cdf311ae154332d131dcf675e3c60e4d14893", size = 1652456, upload-time = "2026-11-02T00:11:54.12Z" },
++]
+ 
+ [[package]]
+ name = "exp-mitmproxy-rs"
+ version = "0.12.11.post1"
+-source = { git = "https://github.com/experientiallabs/mitmproxy_rs.git?subdirectory=mitmproxy-rs&rev=866da0a0aff1a8e57def4da6a941fca0c44dd98d#866da0a0aff1a8e57def4da6a941fca0c44dd98d" }
++source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "mitmproxy-linux", marker = "sys_platform == 'linux'" },
+     { name = "mitmproxy-macos", marker = "sys_platform == 'darwin'" },
+     { name = "mitmproxy-windows", marker = "os_name == 'nt'" },
+ ]
++sdist = { url = "https://files.pythonhosted.org/packages/1f/84/71cc96c773c4563f203ce19acf4949b307db396f8c88b5d9c18903a4290d/exp_mitmproxy_rs-0.12.11.post1.tar.gz", hash = "sha256:446ece932e8e9e6bfc72559961953c1b1eda0dce553aa150076e4f5634fd0c71", size = 1333480, upload-time = "2026-09-25T02:33:18.394Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/d9/05/63600c6da6934ad6956fb646952027dcf4026e2b1a38536b969db2483820/exp_mitmproxy_rs-0.12.11.post1-cp312-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:235c98140bd40f1bd66d85f90e61802aae7ed57661e9cef73717b931ed450a4d", size = 7122966, upload-time = "2026-09-25T02:33:10.349Z" },
++    { url = "https://files.pythonhosted.org/packages/09/fa/434353607f283a261bcdf5fff3f47ef0a063a233539b955bbe55cef95b19/exp_mitmproxy_rs-0.12.11.post1-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e9f81267d092c75c6f5bd33a6f8ca69668dabe910b172cf947fb38b9ef98d635", size = 3101767, upload-time = "2026-09-25T02:33:13.008Z" },
++    { url = "https://files.pythonhosted.org/packages/0e/99/6cf273d940d5157e4cc471c4e30d550bcd09d12f42c836af4a9476f84b67/exp_mitmproxy_rs-0.12.11.post1-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:324e48c4cbbf6bf52bc285b90c33602e2921b7085554ad6c48216744eaddf964", size = 3270782, upload-time = "2026-09-25T02:33:15.026Z" },
++    { url = "https://files.pythonhosted.org/packages/5b/15/ce094e8a10e17e823fee302144b23ba27c6b8de6309584d50ce8e02788ca/exp_mitmproxy_rs-0.12.11.post1-cp312-abi3-win_amd64.whl", hash = "sha256:69e39f216e467fb919480ab3655b9e28df11daa9615569a2d09d7e8d80d37faf", size = 3324642, upload-time = "2026-09-25T02:33:16.691Z" },
++]
+ 
+ [[package]]
+ name = "experiential"
+@@ -1047,9 +1066,9 @@ requires-dist = [
+     { name = "click", specifier = "==8.4.2" },
+     { name = "cryptography", marker = "python_full_version >= '3.13'", specifier = "==50.0.1" },
+     { name = "et-xmlfile", marker = "extra == 'artifact-edits'", specifier = "==2.0.0" },
+-    { name = "exp-gateway-native", directory = "exp/runtime/gateway/native" },
+-    { name = "exp-mitmproxy", marker = "python_full_version >= '3.13'", git = "https://github.com/experientiallabs/mitmproxy.git?rev=a401f5af274a534c7c44be5ea3e542651970cfbc" },
+-    { name = "exp-mitmproxy-rs", marker = "python_full_version >= '3.13'", git = "https://github.com/experientiallabs/mitmproxy_rs.git?subdirectory=mitmproxy-rs&rev=866da0a0aff1a8e57def4da6a941fca0c44dd98d" },
++    { name = "exp-gateway-native", specifier = "==0.3.205" },
++    { name = "exp-mitmproxy", marker = "python_full_version >= '3.13'", specifier = "==12.2.3.post3" },
++    { name = "exp-mitmproxy-rs", marker = "python_full_version >= '3.13'", specifier = "==0.12.11.post1" },
+     { name = "experiential", extras = ["artifact-edits"], marker = "extra == 'dev'" },
+     { name = "experiential", extras = ["sft"], marker = "extra == 'dev'" },
+     { name = "filelock", specifier = "==4.2.1" },
